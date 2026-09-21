@@ -1,5 +1,6 @@
 import time
 import tkinter as tk
+import ctypes
 from tkinter import filedialog, messagebox
 from pathlib import Path
 from PIL import Image, ImageTk
@@ -8,6 +9,15 @@ from PIL import Image, ImageTk
 DWELL_MS = 600# 滞留時間（ms）
 DWELL_MS_DELETE = 800# 滞留時間（ms）
 BUTTON_SIZE = (200, 200)
+# ===== Windows 仮想キーコード =====
+VK_CONVERT = 0x1C       # 変換キー
+VK_RETURN = 0x0D        # Enter
+VK_SPACE = 0x20         # Space
+VK_DOWN = 0x28          #下矢印
+VK_UP = 0x26            #上矢印
+VK_BACK = 0x08          #Backspace
+
+KEYEVENTF_KEYUP = 0x0002
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -311,6 +321,28 @@ class App(tk.Tk):
             "つ": "っ",
         }
 
+        self.KANA_ROMAJI = {
+            "あ": "a", "い": "i", "う": "u", "え": "e", "お": "o",
+            "か": "ka", "き": "ki", "く": "ku", "け": "ke", "こ": "ko",
+            "さ": "sa", "し": "shi", "す": "su", "せ": "se", "そ": "so",
+            "た": "ta", "ち": "chi", "つ": "tsu", "て": "te", "と": "to",
+            "な": "na", "に": "ni", "ぬ": "nu", "ね": "ne", "の": "no",
+            "は": "ha", "ひ": "hi", "ふ": "fu", "へ": "he", "ほ": "ho",
+            "ま": "ma", "み": "mi", "む": "mu", "め": "me", "も": "mo",
+            "や": "ya", "ゆ": "yu","よ": "yo",
+            "ら": "ra", "り": "ri", "る": "ru", "れ": "re", "ろ": "ro",
+            "わ": "wa", "を": "wo", "ん": "nn",
+            # 濁音
+            "が": "ga", "ぎ": "gi", "ぐ": "gu", "げ": "ge", "ご": "go",
+            "ざ": "za", "じ": "ji", "ず": "zu", "ぜ": "ze", "ぞ": "zo",
+            "だ": "da", "ぢ": "di", "づ": "du", "で": "de", "ど": "do",
+            "ば": "ba", "び": "bi", "ぶ": "bu", "べ": "be", "ぼ": "bo",
+            # 半濁音
+            "ぱ": "pa", "ぴ": "pi", "ぷ": "pu", "ぺ": "pe", "ぽ": "po",
+            # 小文字
+            "ぁ": "xa", "ぃ": "xi", "ぅ": "xu", "ぇ": "xe", "ぉ": "xo", "ゃ": "xya", "ゅ": "xyu", "ょ": "xyo","っ": "xtsu",
+        }
+
         self.alphabet_groups = {
             "alphabet_abc": {
                 "label": "ABC",
@@ -413,13 +445,20 @@ class App(tk.Tk):
             },
         }
 
+    
     def __init__(self):
         super().__init__()
         self.attributes("-fullscreen", True)
         self.bind("<Escape>", lambda e: self.attributes("-fullscreen", False))
+        self.bind("<F2>", lambda event: self.ime_convert())
+        self.bind("<F3>", lambda event: self.ime_next_candidate())
+        self.bind("<F4>", lambda event: self.ime_previous_candidate())
+        self.bind("<F5>", lambda event: self.ime_confirm())
+        self.bind("<F6>", lambda event: self.test_ime_input())
+
 
         self.setup_kana_data()
-
+        self.last_kana = None
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -492,7 +531,63 @@ class App(tk.Tk):
         """キャレット位置を表示し、Textへフォーカスを戻す。"""
         self.text.see("insert")
         self.text.focus_set()
-    
+
+    def send_windows_key(self, vk_code):
+        """Windowsへキー入力を送信する"""
+
+        self.text.focus_force()
+        self.update_idletasks()
+
+        ctypes.windll.user32.keybd_event(
+            vk_code,
+            0,
+            0,
+            0
+        )
+
+        ctypes.windll.user32.keybd_event(
+            vk_code,
+            0,
+            KEYEVENTF_KEYUP,
+            0
+        )
+
+    def ime_convert(self):
+        """Windows IMEの変換キーを送る"""
+
+        self.send_windows_key(VK_SPACE)
+
+    def ime_next_candidate(self):
+        """次の変換候補"""
+        self.send_windows_key(VK_DOWN)
+
+    def ime_previous_candidate(self):
+        """前の変換候補"""
+        self.send_windows_key(VK_UP)
+
+    def ime_confirm(self):
+        """現在の候補を確定"""
+        self.send_windows_key(VK_RETURN)
+
+    def send_ascii_text(self, text):
+        """英字をWindowsのキー入力として送信する"""
+        self.text.focus_force()
+        self.update_idletasks()
+
+        for char in text.lower():
+
+            if "a" <= char <= "z":
+                # Windowsの仮想キーコードでは
+                # A～Z = 0x41～0x5A
+                vk_code = ord(char.upper())
+
+                self.send_windows_key(vk_code)
+
+
+    def test_ime_input(self):
+        """IME入力のテスト"""
+        self.send_ascii_text("kyou")
+
     # ===== txt 読込 =====
     def load_txt(self):
         path = filedialog.askopenfilename(
@@ -688,7 +783,7 @@ class App(tk.Tk):
                 self.kana_images[image_key]["normal"],
                 selected_image=self.kana_images[image_key]["selected"],
                 dwell_ms=DWELL_MS,
-                command=lambda c=char: self.insert_char(c),
+                command=lambda c=char: self.insert_char_ime(c),
                 bd=0
             )
             button.grid(
@@ -707,7 +802,7 @@ class App(tk.Tk):
                 self.kana_images["dakuten"]["normal"],
                 selected_image=self.kana_images["dakuten"]["selected"],
                 dwell_ms=DWELL_MS,
-                command=lambda: self.convert_previous_char(self.DAKUTEN_MAP),
+                command=lambda: self.convert_previous_char_ime(self.DAKUTEN_MAP),
                 bd=0
             )
             button.grid(row=1, column=option_col, padx=10, pady=10)
@@ -720,7 +815,7 @@ class App(tk.Tk):
                 self.kana_images["handakuten"]["normal"],
                 selected_image=self.kana_images["handakuten"]["selected"],
                 dwell_ms=DWELL_MS,
-                command=lambda: self.convert_previous_char(self.HANDAKUTEN_MAP),
+                command=lambda: self.convert_previous_char_ime(self.HANDAKUTEN_MAP),
                 bd=0
             )
             button.grid(row=1, column=option_col, padx=10, pady=10)
@@ -733,7 +828,7 @@ class App(tk.Tk):
                 self.kana_images["small"]["normal"],
                 selected_image=self.kana_images["small"]["selected"],
                 dwell_ms=DWELL_MS,
-                command=lambda: self.convert_previous_char(self.SMALL_MAP),
+                command=lambda: self.convert_previous_char_ime(self.SMALL_MAP),
                 bd=0
             )
             button.grid(row=1, column=option_col, padx=10, pady=10)
@@ -844,6 +939,37 @@ class App(tk.Tk):
 
         # 変換後は行選択画面に戻る
         #self.show_row_keyboard()
+    
+    def convert_previous_char_ime(self, convert_map):
+        """直前にIME入力したかなを別のかなに置き換える"""
+
+        # 最後に入力したかなを取得
+        prev_char = self.last_kana
+
+        if prev_char is None:
+            return
+
+        # 小文字などに変換できるか確認
+        converted_char = convert_map.get(prev_char)
+
+        if converted_char is None:
+            return
+
+        # IME上の直前の文字をBackspaceで削除
+        self.send_windows_key(VK_BACK)
+
+        # 変換後のかなに対応するローマ字を取得
+        romaji = self.KANA_ROMAJI.get(converted_char)
+
+        if romaji is None:
+            print(f"ローマ字が登録されていません: {converted_char}")
+            return
+
+        # IMEへ入力
+        self.send_ascii_text(romaji)
+
+        # 最後に入力したかなを更新
+        self.last_kana = converted_char
 
 
     def insert_char(self, char):
@@ -853,6 +979,21 @@ class App(tk.Tk):
 
         # 入力後は行選択画面に戻る
         #self.show_row_keyboard()
+    
+    def insert_char_ime(self, char):
+        """ひらがなに対応するローマ字をIMEへ送信する"""
+
+        romaji = self.KANA_ROMAJI.get(char)
+
+        if romaji is None:
+            print(f"ローマ字が登録されていません: {char}")
+            return
+
+        print(f"IME入力: {char} -> {romaji}")
+
+        self.send_ascii_text(romaji)
+        # 最後に入力したかなを記録
+        self.last_kana = char
 
 if __name__ == "__main__":
     App().mainloop()
